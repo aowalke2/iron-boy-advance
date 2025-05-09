@@ -5,6 +5,7 @@ use std::fs;
 use serde::Deserialize;
 use serde_repr::Deserialize_repr;
 
+use crate::cpu::{ABT_BANK, FIQ_BANK, IRQ_BANK, SVC_BANK, UND_BANK, USR_BANK};
 #[allow(unused)]
 use crate::{CpuMode, cpu::Arm7tdmiCpu, psr::ProgramStatusRegister};
 
@@ -86,51 +87,51 @@ fn single_step_tests() {
     // Will keep a list of the files I want to run until i complete all the instructions
     // completed
     let files = [
-        // "arm_b_bl.json", //Done
-        // "arm_bx.json",   //Done
-        // "arm_cdp.json",                       //Skip
-        // "arm_data_proc_immediate.json", //Done
-        // "arm_data_proc_immediate_shift.json", //Done
-        // "arm_data_proc_register_shift.json",  //Done
-        "arm_ldm_stm.json",
-        // "arm_ldr_str_immediate_offset.json", //Done
-        // "arm_ldr_str_register_offset.json", //Done
-        // "arm_ldrh_strh.json", //Done
-        // "arm_ldrsb_ldrsh.json", //Done
-        // "arm_mcr_mrc.json", //Skip
-        // "arm_mrs.json", //Done
-        // "arm_msr_imm.json", //Done
-        // "arm_msr_reg.json", //Done
-        // "arm_mul_mla.json", //Done
-        // "arm_mull_mlal.json", //Done
-        // "arm_stc_ldc.json", //Skip
-        // "arm_swi.json",
-        // "arm_swp.json",
-        // "thumb_add_cmp_mov_hi.json",
-        // "thumb_add_sp_or_pc.json",
-        // "thumb_add_sub.json",
-        // "thumb_add_sub_sp.json",
-        // "thumb_b.json",
-        // "thumb_bcc.json",
-        // "thumb_bl_blx_prefix.json",
-        // "thumb_bl_suffix.json",
-        // "thumb_bx.json",
-        // "thumb_data_proc.json",
-        // "thumb_ldm_stm.json",
-        // "thumb_ldr_pc_rel.json",
-        // "thumb_ldr_str_imm_offset.json",
-        // "thumb_ldr_str_reg_offset.json",
-        // "thumb_ldr_str_sp_rel.json",
-        // "thumb_ldrb_strb_imm_offset.json",
-        // "thumb_ldrh_strh_imm_offset.json",
-        // "thumb_ldrh_strh_reg_offset.json",
-        // "thumb_ldrsb_strb_reg_offset.json",
-        // "thumb_ldrsh_ldrsb_reg_offset.json",
-        // "thumb_lsl_lsr_asr.json",
-        // "thumb_mov_cmp_add_sub.json",
-        // "thumb_push_pop.json",
-        // "thumb_swi.json",
-        // "thumb_undefined_bcc.json",
+        "arm_b_bl.json", //Done
+                         // "arm_bx.json",   //Done
+                         // "arm_cdp.json",                       //Skip
+                         // "arm_data_proc_immediate.json", //Done
+                         // "arm_data_proc_immediate_shift.json", //Done
+                         // "arm_data_proc_register_shift.json",  //Done
+                         // "arm_ldm_stm.json",
+                         // "arm_ldr_str_immediate_offset.json", //Done
+                         // "arm_ldr_str_register_offset.json", //Done
+                         // "arm_ldrh_strh.json", //Done
+                         // "arm_ldrsb_ldrsh.json", //Done
+                         // "arm_mcr_mrc.json", //Skip
+                         // "arm_mrs.json", //Done
+                         // "arm_msr_imm.json", //Done
+                         // "arm_msr_reg.json", //Done
+                         // "arm_mul_mla.json", //Done
+                         // "arm_mull_mlal.json", //Done
+                         // "arm_stc_ldc.json", //Skip
+                         // "arm_swi.json",
+                         // "arm_swp.json",
+                         // "thumb_add_cmp_mov_hi.json",
+                         // "thumb_add_sp_or_pc.json",
+                         // "thumb_add_sub.json",
+                         // "thumb_add_sub_sp.json",
+                         // "thumb_b.json",
+                         // "thumb_bcc.json",
+                         // "thumb_bl_blx_prefix.json",
+                         // "thumb_bl_suffix.json",
+                         // "thumb_bx.json",
+                         // "thumb_data_proc.json",
+                         // "thumb_ldm_stm.json",
+                         // "thumb_ldr_pc_rel.json",
+                         // "thumb_ldr_str_imm_offset.json",
+                         // "thumb_ldr_str_reg_offset.json",
+                         // "thumb_ldr_str_sp_rel.json",
+                         // "thumb_ldrb_strb_imm_offset.json",
+                         // "thumb_ldrh_strh_imm_offset.json",
+                         // "thumb_ldrh_strh_reg_offset.json",
+                         // "thumb_ldrsb_strb_reg_offset.json",
+                         // "thumb_ldrsh_ldrsb_reg_offset.json",
+                         // "thumb_lsl_lsr_asr.json",
+                         // "thumb_mov_cmp_add_sub.json",
+                         // "thumb_push_pop.json",
+                         // "thumb_swi.json",
+                         // "thumb_undefined_bcc.json",
     ];
 
     // let directory = fs::read_dir("../external/arm7tdmi/v1").expect("Unable to access directory");
@@ -157,32 +158,49 @@ fn single_step_tests() {
             let final_state = test.final_state;
 
             cpu.set_general_registers(intial_state.r);
-            cpu.set_banked_registers_fiq(intial_state.r_fiq);
-            cpu.set_banked_registers_svc(intial_state.r_svc);
-            cpu.set_banked_registers_abt(intial_state.r_abt);
-            cpu.set_banked_registers_irq(intial_state.r_irq);
-            cpu.set_banked_registers_und(intial_state.r_und);
+
+            let mut banked_registers = [[0; 7]; 6];
+            for i in 0..7 {
+                banked_registers[USR_BANK][i] = intial_state.r[i + 8];
+                banked_registers[FIQ_BANK][i] = intial_state.r_fiq[i];
+            }
+
+            for i in 0..2 {
+                banked_registers[SVC_BANK][i] = intial_state.r_svc[i];
+                banked_registers[ABT_BANK][i] = intial_state.r_abt[i];
+                banked_registers[IRQ_BANK][i] = intial_state.r_irq[i];
+                banked_registers[UND_BANK][i] = intial_state.r_und[i];
+            }
+
+            cpu.set_banked_registers(banked_registers);
             cpu.set_cpsr(ProgramStatusRegister::from_bits(intial_state.cpsr));
-            cpu.set_spsrs(intial_state.spsr.map(|x| ProgramStatusRegister::from_bits(x)));
+
+            let mut banked_spsrs = [intial_state.cpsr; 6];
+            for i in 1..6 {
+                banked_spsrs[i] = intial_state.spsr[i - 1];
+            }
+
+            cpu.set_banked_spsrs(banked_spsrs.map(|x| ProgramStatusRegister::from_bits(x)));
             cpu.set_pipeline(intial_state.pipeline);
 
             cpu.cycle();
 
             assert_eq!(cpu.general_registers(), final_state.r);
-            assert_eq!(cpu.banked_registers_fiq(), final_state.r_fiq);
-            assert_eq!(cpu.banked_registers_svc(), final_state.r_svc);
-            assert_eq!(cpu.banked_registers_abt(), final_state.r_abt);
-            assert_eq!(cpu.banked_registers_irq(), final_state.r_irq);
-            assert_eq!(cpu.banked_registers_und(), final_state.r_und);
+            assert_eq!(cpu.banked_registers()[FIQ_BANK], final_state.r_fiq);
+            assert_eq!(cpu.banked_registers()[SVC_BANK][5..], final_state.r_svc);
+            assert_eq!(cpu.banked_registers()[ABT_BANK][5..], final_state.r_abt);
+            assert_eq!(cpu.banked_registers()[IRQ_BANK][5..], final_state.r_irq);
+            assert_eq!(cpu.banked_registers()[UND_BANK][5..], final_state.r_und);
+
             assert_eq!(
-                cpu.spsrs().map(|x| x.into_bits()),
+                cpu.banked_spsrs()[1..].iter().map(|x| x.into_bits()).collect::<Vec<u32>>(),
                 final_state.spsr.map(|x| ProgramStatusRegister::from_bits(x).into_bits())
             );
 
             let expected = ProgramStatusRegister::from_bits(final_state.cpsr);
             let mut actual = cpu.cpsr();
 
-            // the booth multiplication sets the carry. data sheet says its set to a meaningless value. Will ignore result
+            // the booth multiplication sets the carry. data sheet says its set to a meaningless value. Will ignore result for now
             if multiplication.contains(&file) {
                 actual.set_carry(expected.carry());
             }

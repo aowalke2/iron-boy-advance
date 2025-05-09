@@ -12,6 +12,14 @@ pub const SP: usize = 13;
 pub const LR: usize = 14;
 pub const PC: usize = 15;
 
+pub const SYS_BANK: usize = 0;
+pub const USR_BANK: usize = SYS_BANK;
+pub const FIQ_BANK: usize = 1;
+pub const SVC_BANK: usize = 2;
+pub const ABT_BANK: usize = 3;
+pub const IRQ_BANK: usize = 4;
+pub const UND_BANK: usize = 5;
+
 pub trait Instruction {
     type Size;
     fn execute<I: MemoryInterface>(&self, cpu: &mut Arm7tdmiCpu<I>) -> CpuAction;
@@ -21,13 +29,10 @@ pub trait Instruction {
 
 pub struct Arm7tdmiCpu<I: MemoryInterface> {
     general_registers: [u32; 16],
-    banked_registers_fiq: [u32; 7], //r8 to r14
-    banked_registers_svc: [u32; 2], //r13 to r14
-    banked_registers_abt: [u32; 2], //r13 to r14
-    banked_registers_irq: [u32; 2], //r13 to r14
-    banked_registers_und: [u32; 2], //r13 to r14
-    spsrs: [ProgramStatusRegister; 5],
+    banked_registers: [[u32; 7]; 6], //r8 to r14
+    banked_spsrs: [ProgramStatusRegister; 6],
     cpsr: ProgramStatusRegister,
+    spsr: ProgramStatusRegister,
     pipeline: [u32; 2],
     bus: I, // May need to make this shared
     next_memory_access: u8,
@@ -68,13 +73,10 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
     pub fn new(bus: I, skip_bios: bool) -> Self {
         let mut cpu = Arm7tdmiCpu {
             general_registers: [0; 16],
-            banked_registers_fiq: [0; 7], //r8 to r14
-            banked_registers_svc: [0; 2], //r13 to r14
-            banked_registers_abt: [0; 2], //r13 to r14
-            banked_registers_irq: [0; 2], //r13 to r14
-            banked_registers_und: [0; 2], //r13 to r14
-            spsrs: [ProgramStatusRegister::from_bits(0x13); 5],
+            banked_registers: [[0; 7]; 6], //r8 to r14
+            banked_spsrs: [ProgramStatusRegister::from_bits(0x13); 6],
             cpsr: ProgramStatusRegister::from_bits(0x13),
+            spsr: ProgramStatusRegister::from_bits(0x13),
             pipeline: [0; 2],
             bus,
             next_memory_access: MemoryAccess::Instruction | MemoryAccess::Nonsequential,
@@ -88,8 +90,8 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
                 cpu.general_registers[SP] = 0x03007F00;
                 cpu.general_registers[LR] = 0x08000000;
                 cpu.general_registers[PC] = 0x08000000;
-                cpu.banked_registers_svc[0] = 0x3007FE0;
-                cpu.banked_registers_irq[0] = 0x3007FA0;
+                cpu.banked_registers[SVC_BANK][5] = 0x3007FE0;
+                cpu.banked_registers[IRQ_BANK][5] = 0x3007FA0;
                 cpu.cpsr.set_mode(CpuMode::System);
                 cpu.cpsr.set_irq_disable(false);
             }
@@ -105,13 +107,10 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
     }
 
     get_set!(general_registers, set_general_registers, [u32; 16]);
-    get_set!(banked_registers_fiq, set_banked_registers_fiq, [u32; 7]);
-    get_set!(banked_registers_svc, set_banked_registers_svc, [u32; 2]);
-    get_set!(banked_registers_abt, set_banked_registers_abt, [u32; 2]);
-    get_set!(banked_registers_irq, set_banked_registers_irq, [u32; 2]);
-    get_set!(banked_registers_und, set_banked_registers_und, [u32; 2]);
-    get_set!(spsrs, set_spsrs, [ProgramStatusRegister; 5]);
+    get_set!(banked_registers, set_banked_registers, [[u32; 7]; 6]);
+    get_set!(banked_spsrs, set_banked_spsrs, [ProgramStatusRegister; 6]);
     get_set!(cpsr, set_cpsr, ProgramStatusRegister);
+    get_set!(spsr, set_spsr, ProgramStatusRegister);
     get_set!(pipeline, set_pipeline, [u32; 2]);
 
     pub fn cycle(&mut self) {
@@ -247,64 +246,38 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
 
     pub fn register(&self, index: usize) -> u32 {
         match index {
-            0..=7 | 15 => self.general_registers[index],
-            8..=12 => match self.cpsr.mode() == CpuMode::Fiq {
-                true => self.banked_registers_fiq[index - 8],
-                false => self.general_registers[index],
-            },
-            13 | 14 => match self.cpsr.mode() {
-                CpuMode::System | CpuMode::User => self.general_registers[index],
-                CpuMode::Fiq => self.banked_registers_fiq[index - 8],
-                CpuMode::Irq => self.banked_registers_irq[index - 13],
-                CpuMode::Supervisor => self.banked_registers_svc[index - 13],
-                CpuMode::Abort => self.banked_registers_abt[index - 13],
-                CpuMode::Undefined => self.banked_registers_und[index - 13],
-                CpuMode::Invalid => panic!("invalid mode"),
-            },
+            0..=15 => self.general_registers[index],
             _ => panic!("Index out of range"),
         }
     }
 
     pub fn set_register(&mut self, index: usize, value: u32) {
         match index {
-            0..=7 | 15 => self.general_registers[index] = value,
-            8..=12 => match self.cpsr.mode() == CpuMode::Fiq {
-                true => self.banked_registers_fiq[index - 8] = value,
-                false => self.general_registers[index] = value,
-            },
-            13 | 14 => match self.cpsr.mode() {
-                CpuMode::System | CpuMode::User => self.general_registers[index] = value,
-                CpuMode::Fiq => self.banked_registers_fiq[index - 8] = value,
-                CpuMode::Supervisor => self.banked_registers_svc[index - 13] = value,
-                CpuMode::Abort => self.banked_registers_abt[index - 13] = value,
-                CpuMode::Irq => self.banked_registers_irq[index - 13] = value,
-                CpuMode::Undefined => self.banked_registers_und[index - 13] = value,
-                CpuMode::Invalid => panic!("invalid mode"),
-            },
+            0..=15 => self.general_registers[index] = value,
             _ => panic!("Index out of range"),
         }
     }
 
-    pub fn spsr(&self) -> ProgramStatusRegister {
+    pub fn banked_spsr(&self) -> ProgramStatusRegister {
         match self.cpsr.mode() {
-            CpuMode::User | CpuMode::System => self.cpsr,
-            CpuMode::Fiq => self.spsrs[0],
-            CpuMode::Supervisor => self.spsrs[1],
-            CpuMode::Abort => self.spsrs[2],
-            CpuMode::Irq => self.spsrs[3],
-            CpuMode::Undefined => self.spsrs[4],
+            CpuMode::User | CpuMode::System => self.banked_spsrs[0],
+            CpuMode::Fiq => self.banked_spsrs[1],
+            CpuMode::Supervisor => self.banked_spsrs[2],
+            CpuMode::Abort => self.banked_spsrs[3],
+            CpuMode::Irq => self.banked_spsrs[4],
+            CpuMode::Undefined => self.banked_spsrs[5],
             CpuMode::Invalid => panic!("invalid mode"),
         }
     }
 
-    pub fn set_spsr(&mut self, spsr: ProgramStatusRegister) {
+    pub fn set_banked_spsr(&mut self, spsr: ProgramStatusRegister) {
         match self.cpsr.mode() {
-            CpuMode::User | CpuMode::System => self.cpsr = spsr,
-            CpuMode::Fiq => self.spsrs[0] = spsr,
-            CpuMode::Supervisor => self.spsrs[1] = spsr,
-            CpuMode::Abort => self.spsrs[2] = spsr,
-            CpuMode::Irq => self.spsrs[3] = spsr,
-            CpuMode::Undefined => self.spsrs[4] = spsr,
+            CpuMode::User | CpuMode::System => self.banked_spsrs[0] = spsr,
+            CpuMode::Fiq => self.banked_spsrs[1] = spsr,
+            CpuMode::Supervisor => self.banked_spsrs[2] = spsr,
+            CpuMode::Abort => self.banked_spsrs[3] = spsr,
+            CpuMode::Irq => self.banked_spsrs[4] = spsr,
+            CpuMode::Undefined => self.banked_spsrs[5] = spsr,
             CpuMode::Invalid => panic!("invalid mode"),
         }
     }
@@ -315,13 +288,9 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
 
     pub fn reset(&mut self, skip_bios: bool) {
         self.general_registers = [0; 16];
-        self.banked_registers_fiq = [0; 7]; //r8 to r14
-        self.banked_registers_svc = [0; 2]; //r13 to r14
-        self.banked_registers_abt = [0; 2]; //r13 to r14
-        self.banked_registers_irq = [0; 2]; //r13 to r14
-        self.banked_registers_und = [0; 2]; //r13 to r14
-        self.spsrs = [ProgramStatusRegister::from_bits(0x13); 5];
+        self.banked_registers = [[0; 7]; 6]; //r8 to r14
         self.cpsr = ProgramStatusRegister::from_bits(0x13);
+        self.spsr = ProgramStatusRegister::from_bits(0x13);
         self.pipeline = [0; 2];
         self.next_memory_access = MemoryAccess::Instruction | MemoryAccess::Nonsequential;
 
@@ -330,8 +299,8 @@ impl<I: MemoryInterface> Arm7tdmiCpu<I> {
                 self.general_registers[SP] = 0x03007F00;
                 self.general_registers[LR] = 0x08000000;
                 self.general_registers[PC] = 0x08000000;
-                self.banked_registers_svc[0] = 0x3007FE0;
-                self.banked_registers_irq[0] = 0x3007FA0;
+                self.banked_registers[SVC_BANK][0] = 0x3007FE0;
+                self.banked_registers[IRQ_BANK][0] = 0x3007FA0;
                 self.cpsr.set_mode(CpuMode::System);
                 self.cpsr.set_irq_disable(false);
             }
